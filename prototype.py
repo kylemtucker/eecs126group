@@ -245,7 +245,9 @@ def get_next_city_goal(num_points, player_id, board):
         return Goal(CITY, num_turns=min_num_turns, end=best_end)
 
 ################## ABOVE IS DONE ##############################
-################## WORK IN PROGRESS BELOW ##############################
+
+
+################## POORLY DOCUMENTED BELOW ##############################
 def action(self):
     while len(self.preComp) > 0:
         goal = self.preComp.pop()
@@ -270,13 +272,6 @@ def action(self):
         else:
             self.preComp.append(goal)
             break
-
-
-
-def dumpPolicy(self, max_resources):
-    new_resources = np.minimum(self.resources, max_resources // 3)
-    return self.resources - new_resources
-
 
 def planBoard(baseBoard):
     plan = []
@@ -338,3 +333,8 @@ def planBoard(baseBoard):
     #So we can push and pop effectively.
     plan.reverse()
     return plan
+
+############################# TO DO BELOW ##################################
+def dumpPolicy(self, max_resources):
+    new_resources = np.minimum(self.resources, max_resources // 3)
+    return self.resources - new_resources
