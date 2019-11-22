@@ -102,42 +102,20 @@ resource aquisition.
 def get_turns_for_resources(required, player_id, board):
     exchange_rate = get_exchange_rate(player_id, board)
     expected_resources_per_turn = get_expected_resources_per_turn(player_id, board)
-    possible_resources = [r for r in range(3) if expected_resources_per_turn[r] > 0]
-    if len(possible_resources) == 0:
+    if (expected_resources_per_turn == 0).all():
         return float("inf")
-    #Take the array of required resources and figure out if trades are necessary.
-    #If so, consider all possible maximal trades for each necessary trade. A trade
-    #is defined to be maximal if all of one of the desired resources come from
-    #trading only one other resource.
-    #This implementation uses DFS to search that space.
-    equivalent_required = []
-    stack = [required]
-    while stack:
-        required = stack.pop()
-        unobtainable_resource = None
-        #Find children based on the first resource must be traded for.
-        for resource in range(3):
-            if required[resource] != 0 and expected_resources_per_turn[resource] == 0:
-                unobtainable_resource = resource
-                break
-        if unobtainable_resource != None:
-            #We consider trades here.
-            for resource in possible_resources:
-                subsitute = required.copy()
-                subsitute[resource] += exchange_rate[resource] * required[unobtainable_resource]
-                subsitute[unobtainable_resource] = 0
-                stack.append(subsitute)
-        else:
-            #No need to consider trades for this node.
-            equivalent_required.append(required)
-    #Compute the best equivalent equivalent resource array.
-    impossible_resources = [r for r in range(3) if expected_resources_per_turn[r] <= 0]
-    expected_resources_per_turn = np.delete(expected_resources_per_turn, impossible_resources)
-    equivalent_required = np.delete(np.array(equivalent_required), impossible_resources, axis=1)
-
-    #Number of turns for each equivalent resource array.
-    num_turns = np.amax(equivalent_required / expected_resources_per_turn, axis=1)
-    return np.amin(num_turns)
+    #Iteratively finds the number of turns it takes to achieve REQUIRED.
+    num_turns = 0
+    required = required.astype(float)
+    while (required > 0).any():
+        num_turns += 1
+        required -= expected_resources_per_turn
+        trades = (-required / exchange_rate).astype(int)
+        for resource in np.argwhere(trades > 0).flatten():
+            for _ in range(trades[resource]):
+                required[np.argmax(required)] -= 1
+                required[resource] += exchange_rate[resource]
+    return num_turns
 
 """
 Returns a the expected number of turns it will take for the player with PLAYER_ID
@@ -208,7 +186,7 @@ def get_next_settlement_goal(num_points, player_id, board):
             if num_roads not in settlement_costs:
                 required = num_roads * COSTS[ROAD] + COSTS[SETTLEMENT]
                 settlement_costs[num_roads] = get_turns_for_resources(required, player_id, board)
-            num_turns = settlement_costs[num_roads].copy()
+            num_turns = settlement_costs[num_roads]
             #Compute the number of turns it takes to buy the necessary victory points,
             #after having built the settlement.
             board.settlements[settlement] = player_id
