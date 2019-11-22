@@ -32,7 +32,6 @@ BRICK = 1
 GRAIN = 2
 
 MAX_POINTS = 10
-ROBBER_MAX_RESOURCES = 7
 
 class Goal:
     def __init__(self, type, end=None, start=None, num_turns=None):
@@ -372,7 +371,7 @@ def dumpPolicy(self, max_resources):
     num_resources = np.sum(self.resources)
     dump = np.zeros(3)
 
-    while num_resources > ROBBER_MAX_RESOURCES:
+    while num_resources > max_resources:
         resource = np.argmax(surplus)
         dump[resource] += 1
         surplus[resource] -= 1
