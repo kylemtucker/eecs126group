@@ -50,7 +50,7 @@ class Goal:
             type = "city"
         if self.type == 3:
             type = "road"
-        return "Goal: {0} from {1} to {2}".format(type, self.start, self.end)
+        return "Goal: {0} from {1} to {2} in {3}.".format(type, self.start, self.end, self.num_turns)
 
 
 """
@@ -68,11 +68,9 @@ def get_expected_resources_per_turn(player_id, board):
     return ROLL_PROBABILITIES.dot(board.get_resources(player_id))
 
 """
-Returns a numpy 3-array representing the exchange rate that the player
-with PLAYER_ID has on [wood, brick, grain] on BOARD.
-
-The exchange rate of a resource is how much of that resource is required
-to trade for another resouce.
+Returns a numpy 3-array representing the number of each resources that the
+player with PLAYER_ID needs to trade for any other resource, ordered by:
+[wood, brick, grain].
 """
 def get_exchange_rate(player_id, board):
     #Find which ports the player owns.
@@ -83,6 +81,7 @@ def get_exchange_rate(player_id, board):
     for city in board.get_player_cities(player_id):
         if board.is_port(city):
             discounts.append(board.which_port(city))
+
     #Calculate the exchange rate based on which ports the player owns.
     if 3 in discounts:
         exchange_rate = [3, 3, 3]
@@ -94,14 +93,18 @@ def get_exchange_rate(player_id, board):
     return np.array(exchange_rate)
 
 """
-Returns an admissible heuristic for the minimum expected number of turns it takes
-for the player with PLAYER_ID to earn the REQUIRED resources on the board BOARD,
-assuming that dumping resources upon a dice roll of 7 has a negligible impact on
-resource aquisition.
+Returns the heuristic for the minimum expected number of turns it takes for the
+player with PLAYER_ID to earn the REQUIRED resources on the board BOARD. In other
+words, this function returns the proxy for hitting time to obtain some list of
+resources.
+
+This implementation assumes that dumping resources upon a dice roll of 7 has a
+negligable impact on hitting time.
 """
-def get_turns_for_resources(required, player_id, board):
+def get_turns_for_resources(player_id, board, required):
     exchange_rate = get_exchange_rate(player_id, board)
     expected_resources_per_turn = get_expected_resources_per_turn(player_id, board)
+
     if (expected_resources_per_turn == 0).all():
         return float("inf")
     #Iteratively finds the number of turns it takes to achieve REQUIRED.
@@ -110,29 +113,28 @@ def get_turns_for_resources(required, player_id, board):
     while (required > 0).any():
         num_turns += 1
         required -= expected_resources_per_turn
-        trades = (-required / exchange_rate).astype(int)
-        for resource in np.argwhere(trades > 0).flatten():
+        trades = -(required / exchange_rate).astype(int)
+        for resource in range(3):
             for _ in range(trades[resource]):
                 required[np.argmax(required)] -= 1
                 required[resource] += exchange_rate[resource]
     return num_turns
 
 """
-Returns a the expected number of turns it will take for the player with PLAYER_ID
-on BOARD to obtain MAX_POINTS - NUM_POINTS victory cards using only maximal required
-trades (see: get_turns_for_resources(required, player_id, board)).
+Returns the hitting time for the player with PLAYER_ID on BOARD to obtain
+MAX_POINTS - NUM_POINTS victory cards.
 """
-def get_turns_for_cards(num_points, player_id, board):
+def get_turns_for_cards(player_id, board, num_points):
     if num_points >= MAX_POINTS:
         return 0
-    return get_turns_for_resources((MAX_POINTS - num_points) * COSTS[CARD], player_id, board)
+    return get_turns_for_resources(player_id, board, (MAX_POINTS - num_points) * COSTS[CARD])
 
 """
-Returns a Goal for the first settlement that minimizes the expected number of turns it takes
-for the player with PLAYER_ID on BOARD to:
-1) Build a settlements at some new location, without building roads;
-2) Buy victory cards until the player has MAX_POINTS - NUM_POINTS points.
-Returns None if there is no valid location on which to build a settlement.
+Returns a Goal for the first settlement.
+
+The current implementation chooses the settlement that minimizes
+the hitting time until the player with PLAYER_ID on BOARD wins via
+buying victory cards after having purchased that first settlement.
 """
 def get_first_settlement_goal(player_id, board):
     #Criteria for best first settlement.
@@ -141,62 +143,81 @@ def get_first_settlement_goal(player_id, board):
         result = get_turns_for_cards(0, player_id, board)
         del board.settlements[settlement]
         return result
-    best_end = board.get_vertex_location(min(range(board.max_vertex), key=num_turns))
-    return Goal(SETTLEMENT, end=best_end)
+    return Goal(SETTLEMENT, end=board.get_vertex_location(min(range(board.max_vertex), key=num_turns)))
 
 """
-Returns a Goal that minimizes the expected number of turns it takes
-for the player with PLAYER_ID on BOARD to:
-1) Build a road to some location that is not adjacent to pre-existing
-   settlements or cities;
-2) Build a settlements at this new location;
-3) Buy victory cards until the player has MAX_POINTS - NUM_POINTS points.
-Returns None if there is no valid location on which to build a settlement
-or if there is no existing settlement on the board beloning to the player.
+Returns a set of (x, y) coordinates where the player with PLAYER_ID
+cannot build a settlement on BOARD, even if they have a road to such
+locations.
+
+This set is generated from coordinates where the player has an existing
+settlement or city and from coordinates which are adjacent to an existing
+settlement or city, as per the rules.
 """
-def get_next_settlement_goal(num_points, player_id, board):
-    #Get current buildings.
-    current_buildings = set(map(board.get_vertex_location, board.get_player_settlements(player_id)))
-    current_buildings.update(map(board.get_vertex_location, board.get_player_cities(player_id)))
-    #Get coordinates where we may begin a road to the next city.
-    start_locations = set(map(board.get_vertex_location, itertools.chain(*board.get_player_roads(player_id))))
-    start_locations.update(current_buildings)
-    #Get places where it is invalid to build another settlement.
-    invalid_locations = current_buildings.copy()
-    invalid_locations.update([(x + 1, y) for x, y in current_buildings])
-    invalid_locations.update([(x - 1, y) for x, y in current_buildings])
-    invalid_locations.update([(x, y + 1) for x, y in current_buildings])
-    invalid_locations.update([(x, y - 1) for x, y in current_buildings])
-    #This function only computes NEXT settlements. Use 
-    #get_first_settlement_goal(player_id, board) instead.
-    if len(current_buildings) == 0:
-        return None
+def get_invalid_settlement_locations(player_id, board):
+    building_locations = set()
+    building_locations.update(map(board.get_vertex_location, board.get_player_settlements(player_id)))
+    building_locations.update(map(board.get_vertex_location, board.get_player_cities(player_id)))
+
+    invalid_locations = set(building_locations)
+    invalid_locations.update((x + 1, y) for x, y in building_locations if board.is_tile(x, y))
+    invalid_locations.update((x - 1, y) for x, y in building_locations if board.is_tile(x, y))
+    invalid_locations.update((x, y + 1) for x, y in building_locations if board.is_tile(x, y))
+    invalid_locations.update((x, y - 1) for x, y in building_locations if board.is_tile(x, y))
+
+    return invalid_locations
+
+"""
+Returns a set of (x, y) coordinates where the player with PLAYER_ID
+can begin a road.
+"""
+def get_road_start_locations(player_id, board):
+    road_locations = set()
+    road_locations.update(map(board.get_vertex_location, itertools.chain(*board.get_player_roads(player_id))))
+    road_locations.update(map(board.get_vertex_location, board.get_player_settlements(player_id)))
+    road_locations.update(map(board.get_vertex_location, board.get_player_cities(player_id)))
+    return road_locations
+
+"""
+Returns a Goal for the next (not first) settlement.
+
+The current implementation chooses the settlement that minimizes
+the hitting time until the player with PLAYER_ID on BOARD wins via
+buying victory cards after having built the shortest possible road
+to such a settlement location and then building that settlement.
+"""
+def get_next_settlement_goal(player_id, board, num_points):
+    road_start_locations = get_road_start_locations(player_id, board)
+    invalid_settlement_locations = get_invalid_settlement_locations(player_id, board)
+
     #This stores the expected time it takes to build a settlement that requires
     #some number of roads, indexed by the number of roads to reduce compute.
     settlement_costs = {}
-    #Compute best next settlement.
+
     best_end, best_start, min_num_turns = None, None, float("inf")
     for settlement in range(board.max_vertex):
         end = board.get_vertex_location(settlement)
-        if end not in invalid_locations:
-            #Compute (or retrieve from the above dict) the number of turns it takes
-            #to build the road to the new settlement and the settlement itself.
-            start = min(start_locations, key=lambda start:manhattan_distance(start, end))
+        if end not in invalid_settlement_locations:
+            start = min(road_start_locations, key=lambda start:manhattan_distance(start, end))
             num_roads = manhattan_distance(start, end)
+
             if num_roads not in settlement_costs:
                 required = num_roads * COSTS[ROAD] + COSTS[SETTLEMENT]
-                settlement_costs[num_roads] = get_turns_for_resources(required, player_id, board)
+                settlement_costs[num_roads] = get_turns_for_resources(player_id, board, required)
             num_turns = settlement_costs[num_roads]
+
             #Compute the number of turns it takes to buy the necessary victory points,
             #after having built the settlement.
             board.settlements[settlement] = player_id
-            num_turns += get_turns_for_cards(num_points, player_id, board)
+            num_turns += get_turns_for_cards(player_id, board, num_points)
             del board.settlements[settlement]
+
             #Keep track of relevent (arg)mins.
             if num_turns < min_num_turns:
                 best_end = end
                 best_start = start
                 min_num_turns = num_turns
+
     #If settlements can no longer be built, return None.
     if best_end == None:
         return None
@@ -204,32 +225,28 @@ def get_next_settlement_goal(num_points, player_id, board):
         return Goal(SETTLEMENT, end=best_end, start=best_start, num_turns=min_num_turns)
 
 """
-Returns a Goal that minimizes the expected number of turns it takes
-for the player with PLAYER_ID on BOARD to:
-1) Build a city at some existing settlement;
-2) Buy victory cards until the player has MAX_POINTS - NUM_POINTS points.
-Returns None if there is no existing settlement on which to build a city.
+Returns a Goal for the next city.
+
+The current implementation chooses the city that minimizes the
+hitting time until the player with PLAYER_ID on BOARD wins via
+buying victory cards after having built the city.
 """
-def get_next_city_goal(num_points, player_id, board):
-    #Saves some computation below.
-    num_points += 1
+def get_next_city_goal(player_id, board, num_points):
     #Compute best next city.
     best_city, min_num_turns = None, float("inf")
     for city in board.get_player_settlements(player_id):
-        #Computes the number of turns it takes to the necessary victory points,
-        #after having built the city.
         board.cities[city] = player_id
         del board.settlements[city]
-        #Implicitly, here num_points is +1 from the original argument to save
-        #minor computation, since building a city gains +1 victory points.
-        num_turns = get_turns_for_cards(num_points, player_id, board)
+        num_turns = get_turns_for_cards(player_id, board, num_points + 1)
         del board.cities[city]
         board.settlements[city] = player_id
-        #Keep track of relevent (arg)mins.
+        
         if num_turns < min_num_turns:
             best_city, min_num_turns = city, num_turns
-    #We only compute this once, since it is the same for all city locations.
-    min_num_turns += get_turns_for_resources(COSTS[CITY], player_id, board)
+
+    #We only compute this once, after the loop, since it is the same for all city locations.
+    min_num_turns += get_turns_for_resources(player_id, board, COSTS[CITY])
+    
     #If cities can no longer be built, return None.
     if best_city == None:
         return None
@@ -257,6 +274,7 @@ def action(self):
             required = COSTS[goal.type] - self.resources
         #Buy (and achieve the goal), if possible.
         if (required <= 0).all():
+            #print(goal)
             if goal.type == CARD:
                 self.buy("card")
             elif goal.type == ROAD:
@@ -291,13 +309,13 @@ def planBoard(baseBoard):
     #Decide next goals.
     while num_points < MAX_POINTS:
         #1) Default goal is to buy cards.
-        next_goal = Goal(CARD, num_turns=get_turns_for_cards(num_points, player_id, board))
+        next_goal = Goal(CARD, num_turns=get_turns_for_cards(player_id, board, num_points))
         #2) Decide if settlement building is better.
-        goal = get_next_settlement_goal(num_points, player_id, board)
+        goal = get_next_settlement_goal(player_id, board, num_points)
         if goal != None and goal.num_turns < next_goal.num_turns:
             next_goal = goal
         #3) Decide if city building is better.
-        goal = get_next_city_goal(num_points, player_id, board)
+        goal = get_next_city_goal(player_id, board, num_points)
         if goal != None and goal.num_turns < next_goal.num_turns:
             next_goal = goal
 
@@ -335,9 +353,35 @@ def planBoard(baseBoard):
             board.cities[city_num] = player_id
             del board.settlements[city_num]
             num_points += 1
+    #print(get_num_turns(player_id, baseBoard, plan))
     #Reverse the list so we can push (append) and pop goals from the plan efficiently.
     plan.reverse()
     return plan
+
+def get_num_turns(player_id, board, goals):
+    board = copy.deepcopy(board)
+    num_turns = 0
+
+    goal = goals[0]
+    board.settlements[board.get_vertex_number(goal.end[0], goal.end[1])] = player_id
+    for goal in goals[1:]:
+        if goal.type == ROAD:
+            end_vertex_number = board.get_vertex_number(goal.end[0], goal.end[1])
+            start_vertex_number = board.get_vertex_number(goal.start[0], goal.start[1])
+            board.roads[(start_vertex_number, end_vertex_number)] = player_id
+            num_turns += get_turns_for_resources(player_id, board, COSTS[ROAD])
+        elif goal.type == SETTLEMENT:
+            end_vertex_number = board.get_vertex_number(goal.end[0], goal.end[1])
+            board.settlements[end_vertex_number] = player_id
+            num_turns += get_turns_for_resources(player_id, board, COSTS[SETTLEMENT])
+        elif goal.type == CITY:
+            end_vertex_number = board.get_vertex_number(goal.end[0], goal.end[1])
+            board.cities[end_vertex_number] = player_id
+            del board.settlements[end_vertex_number]
+            num_turns += get_turns_for_resources(player_id, board, COSTS[CITY])
+        else:
+            num_turns += get_turns_for_resources(player_id, board, COSTS[CARD])
+    return num_turns
 
 ############################# TO DO BELOW ##################################
 def dumpPolicy(self, max_resources):
