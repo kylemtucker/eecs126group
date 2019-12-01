@@ -140,7 +140,7 @@ def get_first_settlement_goal(player_id, board):
     #Criteria for best first settlement.
     def num_turns(settlement):
         board.settlements[settlement] = player_id
-        result = get_turns_for_cards(0, player_id, board)
+        result = get_turns_for_cards(player_id, board, 0)
         del board.settlements[settlement]
         return result
     return Goal(SETTLEMENT, end=board.get_vertex_location(min(range(board.max_vertex), key=num_turns)))
