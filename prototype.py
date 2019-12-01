@@ -81,7 +81,6 @@ def get_exchange_rate(player_id, board):
     for city in board.get_player_cities(player_id):
         if board.is_port(city):
             discounts.append(board.which_port(city))
-
     #Calculate the exchange rate based on which ports the player owns.
     if 3 in discounts:
         exchange_rate = [3, 3, 3]
@@ -198,26 +197,22 @@ def get_next_settlement_goal(player_id, board, num_points):
     for settlement in range(board.max_vertex):
         end = board.get_vertex_location(settlement)
         if end not in invalid_settlement_locations:
+            #Compute time to build settlement, includingg roads.
             start = min(road_start_locations, key=lambda start:manhattan_distance(start, end))
             num_roads = manhattan_distance(start, end)
-
             if num_roads not in settlement_costs:
                 required = num_roads * COSTS[ROAD] + COSTS[SETTLEMENT]
                 settlement_costs[num_roads] = get_turns_for_resources(player_id, board, required)
             num_turns = settlement_costs[num_roads]
-
-            #Compute the number of turns it takes to buy the necessary victory points,
-            #after having built the settlement.
+            #Change state to compute hitting time, then revert state.
             board.settlements[settlement] = player_id
             num_turns += get_turns_for_cards(player_id, board, num_points)
             del board.settlements[settlement]
-
             #Keep track of relevent (arg)mins.
             if num_turns < min_num_turns:
                 best_end = end
                 best_start = start
                 min_num_turns = num_turns
-
     #If settlements can no longer be built, return None.
     if best_end == None:
         return None
@@ -235,18 +230,17 @@ def get_next_city_goal(player_id, board, num_points):
     #Compute best next city.
     best_city, min_num_turns = None, float("inf")
     for city in board.get_player_settlements(player_id):
+        #Change state to compute hitting time, then revert state.
         board.cities[city] = player_id
         del board.settlements[city]
         num_turns = get_turns_for_cards(player_id, board, num_points + 1)
         del board.cities[city]
         board.settlements[city] = player_id
-        
+        #Keep track of relevent (arg)mins.
         if num_turns < min_num_turns:
             best_city, min_num_turns = city, num_turns
-
     #We only compute this once, after the loop, since it is the same for all city locations.
     min_num_turns += get_turns_for_resources(player_id, board, COSTS[CITY])
-    
     #If cities can no longer be built, return None.
     if best_city == None:
         return None
@@ -274,7 +268,6 @@ def action(self):
             required = COSTS[goal.type] - self.resources
         #Buy (and achieve the goal), if possible.
         if (required <= 0).all():
-            #print(goal)
             if goal.type == CARD:
                 self.buy("card")
             elif goal.type == ROAD:
@@ -353,35 +346,9 @@ def planBoard(baseBoard):
             board.cities[city_num] = player_id
             del board.settlements[city_num]
             num_points += 1
-    #print(get_num_turns(player_id, baseBoard, plan))
     #Reverse the list so we can push (append) and pop goals from the plan efficiently.
     plan.reverse()
     return plan
-
-def get_num_turns(player_id, board, goals):
-    board = copy.deepcopy(board)
-    num_turns = 0
-
-    goal = goals[0]
-    board.settlements[board.get_vertex_number(goal.end[0], goal.end[1])] = player_id
-    for goal in goals[1:]:
-        if goal.type == ROAD:
-            end_vertex_number = board.get_vertex_number(goal.end[0], goal.end[1])
-            start_vertex_number = board.get_vertex_number(goal.start[0], goal.start[1])
-            board.roads[(start_vertex_number, end_vertex_number)] = player_id
-            num_turns += get_turns_for_resources(player_id, board, COSTS[ROAD])
-        elif goal.type == SETTLEMENT:
-            end_vertex_number = board.get_vertex_number(goal.end[0], goal.end[1])
-            board.settlements[end_vertex_number] = player_id
-            num_turns += get_turns_for_resources(player_id, board, COSTS[SETTLEMENT])
-        elif goal.type == CITY:
-            end_vertex_number = board.get_vertex_number(goal.end[0], goal.end[1])
-            board.cities[end_vertex_number] = player_id
-            del board.settlements[end_vertex_number]
-            num_turns += get_turns_for_resources(player_id, board, COSTS[CITY])
-        else:
-            num_turns += get_turns_for_resources(player_id, board, COSTS[CARD])
-    return num_turns
 
 ############################# TO DO BELOW ##################################
 def dumpPolicy(self, max_resources):
