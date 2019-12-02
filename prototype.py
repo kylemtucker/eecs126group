@@ -3,7 +3,7 @@ import copy
 import itertools
 import numpy as np
 
-# Average turns to win: 75.119 #
+# Average turns to win: 67.51 #
 
 ### GLOBALS
 ROLL_PROBABILITIES = np.array([1/36,  #2 
@@ -268,6 +268,7 @@ def action(self):
             required = COSTS[goal.type] - self.resources
         #Buy (and achieve the goal), if possible.
         if (required <= 0).all():
+            #print(goal)
             if goal.type == CARD:
                 self.buy("card")
             elif goal.type == ROAD:
@@ -301,16 +302,20 @@ def planBoard(baseBoard):
     
     #Decide next goals.
     while num_points < MAX_POINTS:
-        #1) Default goal is to buy cards.
-        next_goal = Goal(CARD, num_turns=get_turns_for_cards(player_id, board, num_points))
-        #2) Decide if settlement building is better.
-        goal = get_next_settlement_goal(player_id, board, num_points)
-        if goal != None and goal.num_turns < next_goal.num_turns:
-            next_goal = goal
-        #3) Decide if city building is better.
+        #1) Check for settlements.
+        next_goal = get_next_settlement_goal(player_id, board, num_points)
+        #2) Decide if city building is better.
         goal = get_next_city_goal(player_id, board, num_points)
-        if goal != None and goal.num_turns < next_goal.num_turns:
+        if next_goal == None or (goal != None and goal.num_turns < next_goal.num_turns):
             next_goal = goal
+        #3) If we have more than the minimum number of settlements, decide if buying cards is best.
+        if len(board.get_player_cities(player_id)) + len(board.get_player_settlements(player_id)) >= 3:
+            goal = Goal(CARD, num_turns=get_turns_for_cards(player_id, board, num_points))
+            if goal != None and goal.num_turns < next_goal.num_turns:
+                next_goal = goal
+        # Default to buying cards if no settlements or cities can be built, for some reason.
+        if next_goal == None:
+            next_goal = Goal(CARD, num_turns=get_turns_for_cards(player_id, board, num_points))
 
         if next_goal.type == CARD:
             #Plan to buy cards until the game is over.
@@ -350,7 +355,9 @@ def planBoard(baseBoard):
     plan.reverse()
     return plan
 
-############################# TO DO BELOW ##################################
+"""
+Returns a numpy 3-array of resources to dump, ordered by [wood, brick, grain].
+"""
 def dumpPolicy(self, max_resources):
     goal = self.preComp.pop()
     surplus = self.resources - COSTS[goal.type]
