@@ -27,6 +27,9 @@ COSTS = np.array([[2, 1, 1],
                   [0, 3, 3],
                   [1, 1, 0]])
 
+PROBABILITY_ARRAY = [1./36, 2./36, 3./36, 4./36, 5./36, 6./36, 5./36, 4./36, 3./36, 2./36, 1./36] 
+
+
 WOOD = 0
 BRICK = 1
 GRAIN = 2
@@ -335,6 +338,8 @@ def dumpPolicy(self, max_resources):
     surplus[surplus < 0] = 0
     self.preComp.append(goal)
 
+    
+
     num_resources = np.sum(self.resources)
     dump = np.zeros(3)
 
@@ -344,3 +349,43 @@ def dumpPolicy(self, max_resources):
         surplus[resource] -= 1
         num_resources -= 1
     return dump
+
+def dumpPolicy2(self, max_resources):
+    goal = self.preComp.pop()
+    surplus = self.resources - COSTS[goal.type]
+    surplus[surplus < 0] = 0
+    self.preComp.append(goal)
+
+    resourceMatrix = self.board.get_resources(self.player_id)
+    
+    wood = 0
+    brick = 0
+    grain = 0
+    
+    
+    
+    for i in range(len(resourceMatrix)): # i + 2 is the roll, the value at i are the resources gained for such role
+        wood += PROBABILITY_ARRAY[i] * resourceMatrix[i][WOOD]
+        brick += PROBABILITY_ARRAY[i] * resourceMatrix[i][BRICK]
+        grain += PROBABILITY_ARRAY[i] * resourceMatrix[i][GRAIN]
+
+            
+    ratios = np.zeros(3)
+    ratios[WOOD] = wood / (wood + brick + grain)
+    ratios[BRICK] = brick / (wood + brick + grain)
+    ratios[GRAIN] = grain / (wood + brick + grain)
+    
+    
+
+    num_resources = np.sum(self.resources)
+    dump = np.zeros(3)
+    
+    while num_resources > max_resources:
+        weightedSurplus = [surplus[i] * ratios[i] for i in range(3)]
+        resource = np.argmax(weightedSurplus)
+        dump[resource] += 1
+        surplus[resource] -= 1
+        num_resources -= 1
+        
+    return dump
+        
